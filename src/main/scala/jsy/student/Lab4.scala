@@ -128,7 +128,11 @@ object Lab4 extends jsy.util.JsyApplication with Lab4Like {
         case(TNumber,tgot) => err(tgot,e2)
         case(tgot,TNumber) => err(tgot,e1)
       }
-      case Binary(Eq|Ne, e1, e2) if!(hasFunctionTyp(typeof(env,e1)) || hasFunctionTyp(typeof(env,e2))) => TBool
+      case Binary(Eq|Ne, e1, e2) => if(hasFunctionTyp(typeof(env,e1))) err(typeof(env,e1),e1) else {
+        if(hasFunctionTyp((typeof(env,e2)))) err(typeof(env,e2),e2) else{
+          if(typeof(env,e1) == typeof(env,e2)) TBool else err(typeof(env,e2),e2)
+        }
+      }
       case Binary(Lt|Le|Gt|Ge, e1, e2) => (typeof(env,e1),typeof(env,e2)) match {
         case (TNumber,TNumber) => TBool
         case (TString,TString) => TBool
@@ -209,22 +213,20 @@ object Lab4 extends jsy.util.JsyApplication with Lab4Like {
       case N(_) | B(_) | Undefined | S(_) => e
       case Print(e1) => Print(substitute(e1, esub, x))
         /***** Cases from Lab 3 */
-      case Unary(uop, e1) => Unary(uop,substitute(e1,esub,x))
-      case Binary(bop, e1, e2) => Binary(bop,substitute(e1,esub,x),substitute(e2,esub,x))
-      case If(e1, e2, e3) => If(substitute(e1,esub,x),substitute(e2,esub,x), substitute(e3,esub,x))
-      case Call(e1, e2) => ??? //Call(substitute(e1,esub,x),substitute(e2,esub,x))
+      case Unary(uop, e1) => Unary(uop,subst(e1))
+      case Binary(bop, e1, e2) => Binary(bop,subst(e1),subst(e2))
+      case If(e1, e2, e3) => If(subst(e1),subst(e2), subst(e3))
       case Var(y) => {
         if (x==y) esub
         else Var(y)
       }
-      case Decl(mode, y, e1, e2) => ??? //if(x==y) Decl(y,substitute(e1,esub,x),e2)else Decl(y,substitute(e1,esub,x),substitute(e2,esub,x))
+      case Decl(mode, y, e1, e2) => if(x==y) Decl(mode,y,subst(e1),e2) else Decl(mode,y,subst(e1),subst(e2))
         /***** Cases needing adapting from Lab 3 */
-      case Function(p, params, tann, e1) =>
-        ???
-      case Call(e1, args) => ???
+      case Function(p, params, tann, e1) => if(params.exists(t => t._1 == x) || p.contains(x)) e else Function(p,params,tann,subst(e1))
+      case Call(e1, args) => Call(subst(e1),args.map(subst))
         /***** New cases for Lab 4 */
-      case Obj(fields) => ???
-      case GetField(e1, f) => ???
+      case Obj(fields) => Obj(fields.mapValues(e1 => subst(e1)))
+      case GetField(e1, f) => if(x == f) e else GetField(subst(e1),f)
     }
 
     val fvs = freeVars(???)
@@ -281,7 +283,52 @@ object Lab4 extends jsy.util.JsyApplication with Lab4Like {
       /* Base Cases: Do Rules */
       case Print(v1) if isValue(v1) => println(pretty(v1)); Undefined
         /***** Cases needing adapting from Lab 3. */
-      case Unary(Neg, v1) if isValue(v1) => ???
+      case N(_)|B(_)|S(_)|Undefined|Function(_,_,_) => e
+      case Unary(Neg,N(n)) => N(-n)
+      case Unary(Not, B(b)) => B(!b)
+
+
+      case Binary(Plus,S(s1),S(s2))  => S(s1.concat(s2))
+      case Binary(bop @(Times|Minus|Div|Lt|Le|Gt|Ge),v1,v2) if isValue(v1) && isValue(v2) => bop match {
+        case Times => N(toNumber(v1) * toNumber(v2))
+        case Minus => N(toNumber(v1) - toNumber(v2))
+        case Div => N(toNumber(v1) / toNumber(v2))
+        case Lt => (v1, v2) match {
+          case (S(x), S(y)) => B(x < y)
+          //case (Function(_,_,_),_) => throw DynamicTypeError(e)
+          //case (_,Function(_,_,_)) => throw DynamicTypeError(e)
+          case (N(n1), N(n2)) => B(n1 < n2)
+          case (_,_) => throw new UnsupportedOperationException
+        }
+        case Le => (v1, v2) match {
+          case (S(x), S(y)) => B(x <= y)
+          //case (Function(_,_,_),_) => throw DynamicTypeError(e)
+          //case (_,Function(_,_,_)) => throw DynamicTypeError(e)
+          case (N(n1), N(n2)) => B(n1 <= n2)
+          case(_,_) => throw new UnsupportedOperationException
+        }
+        case Gt => (v1, v2) match {
+          case (S(x), S(y)) => B(x > y)
+          //case (Function(_,_,_),_) => throw DynamicTypeError(e)
+          //case (_,Function(_,_,_)) => throw DynamicTypeError(e)
+          case (N(n1), N(n2)) => B(n1 > n2)
+          case (_,_) => throw new UnsupportedOperationException
+        }
+        case Ge => (v1, v2) match {
+          case (S(x), S(y)) => B(x >= y)
+          //case (Function(_,_,_),_) => throw DynamicTypeError(e)
+          //case (_,Function(_,_,_)) => throw DynamicTypeError(e)
+          case (N(n1), N(n2)) => B(n1 >= n2)
+          case (_,_) => throw new UnsupportedOperationException
+        }
+      }
+      case Binary(Seq,v1,e2) if isValue(v1) => e2
+      case Binary(And, B(b),e2) => if(b) e2 else B(b)
+      case Binary(Or,B(b1),e2) => if(b1) B(b1) else e2
+      case Binary(Eq,v1,v2) if(isValue(v1) && isValue(v2)) =>  B(v1 == v2)
+      case Binary(Ne, v1,v2) if(isValue(v1) && isValue(v2)) => B(v1 != v2)
+      case If(B(b),e2,e3) => if(b) e2 else e3
+      case Decl(mode,y,v1,e2) => substitute(e2,v1,y)
         /***** More cases here */
       case Call(v1, args) if isValue(v1) =>
         v1 match {
@@ -306,6 +353,13 @@ object Lab4 extends jsy.util.JsyApplication with Lab4Like {
           case _ => throw StuckError(e)
         }
         /***** New cases for Lab 4. */
+      case GetField(v1,f) if(isValue(v1)) => v1 match {
+        case Obj(fields) => fields.get(f) match {
+          case Some(some) => some
+          case None => throw StuckError
+        }
+        case _ => throw StuckError
+      }
 
       /* Inductive Cases: Search Rules */
       case Print(e1) => Print(step(e1))
@@ -316,7 +370,8 @@ object Lab4 extends jsy.util.JsyApplication with Lab4Like {
       case Call(v1 @ Function(_, _, _, _), args) => ???
       case Call(e1, args) => ???
         /***** New cases for Lab 4. */
-
+      case Obj(f) => Obj(f.mapValues(e => if(isValue(e)) e else step(e)))
+      case GetField(e1,f) => GetField(step(e1),f)
       /* Everything else is a stuck error. Should not happen if e is well-typed.
        *
        * Tip: you might want to first develop by comment out the following line to see which
