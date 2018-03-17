@@ -272,17 +272,23 @@ object Lab4 extends jsy.util.JsyApplication with Lab4Like {
         }
         case Decl(mode, y, e1, e2) =>
           val yp = fresh(y)
-          ???
+          Decl(mode,yp,ren(env,e1),ren(env,e2))
 
         case Function(p, params, retty, e1) => {
           val (pp, envp): (Option[String], Map[String,String]) = p match {
-            case None => ???
-            case Some(x) => ???
+            case None => (None,env)
+            case Some(x) => {
+              val newX = fresh(x)
+              (Some(newX),extend(env,x,newX))
+            }
           }
           val (paramsp, envpp) = params.foldRight( (Nil: List[(String,MTyp)], envp) ) {
-            ???
+            case((pname,ptyp),(pars,env))  =>{
+              val pnew = fresh(pname)
+              ((pnew,ptyp):: pars,extend(env,pname,pnew))
+            }
           }
-          ???
+          Function(p,paramsp,retty,ren(envpp,e1))
         }
 
         case Call(e1, args) => ???
@@ -296,8 +302,8 @@ object Lab4 extends jsy.util.JsyApplication with Lab4Like {
 
   /* Check whether or not an expression is reduced enough to be applied given a mode. */
   def isRedex(mode: Mode, e: Expr): Boolean = mode match {
-    case MConst => if(!isValue(e))
-    case MName => ???
+    case MConst => if(!isValue(e)) true else false
+    case MName => if(!isValue(e)) true else false
   }
 
   def step(e: Expr): Expr = {
@@ -361,18 +367,22 @@ object Lab4 extends jsy.util.JsyApplication with Lab4Like {
         v1 match {
           case Function(p, params, _, e1) => {
             val pazip = params zip args
-            if (???) {
+            if (pazip.forall( {case ((_,MTyp(m,_)),e:Expr) => !isRedex(m,e)}  )) {
               val e1p = pazip.foldRight(e1) {
-                ???
+                (v,acc) => v match {
+                  case ((x,_),v1) => substitute(acc,v1,x)
+                }
               }
               p match {
-                case None => ???
-                case Some(x1) => ???
+                case None => e1p
+                case Some(x1) => substitute(e1p,v1,x1)
               }
             }
             else {
               val pazipp = mapFirst(pazip) {
-                ???
+                A => A match {
+                  case ((s,MTyp(m,t)),e1) => if(isRedex(m,e1)) Some(((s,MTyp(m,t)),step(e1))) else None
+                }
               }
               ???
             }
@@ -391,11 +401,15 @@ object Lab4 extends jsy.util.JsyApplication with Lab4Like {
       /* Inductive Cases: Search Rules */
       case Print(e1) => Print(step(e1))
         /***** Cases from Lab 3. */
-      case Unary(uop, e1) => ???
+      case Unary(uop, e1) => Unary(uop,step(e1))
+      case Binary(bop,v1,e2) if(isValue(v1)) => Binary(bop,v1,step(e2))
+      case Binary(bop,e1,e2) => Binary(bop,step(e1),e2)
+      case If(e1,e2,e3) => If(step(e1),e2,e3)
+      case Decl(mode,x,e1,e2) if(isRedex(mode,e1)) => Decl(mode,x,step(e1),e2)
         /***** More cases here */
         /***** Cases needing adapting from Lab 3 */
-      case Call(v1 @ Function(_, _, _, _), args) => ???
-      case Call(e1, args) => ???
+      case Call(v1 @ Function(_, _, _, _), args) => Call(v1,mapFirst(args){(e: Expr) => if(isRedex(MConst,e)) Some(step(e)) else None})
+      case Call(e1, args) => Call(step(e1),args)
         /***** New cases for Lab 4. */
       case Obj(f) => Obj(f.mapValues(e => if(isValue(e)) e else step(e)))
       case GetField(e1,f) => GetField(step(e1),f)
